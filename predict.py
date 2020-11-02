@@ -1,11 +1,22 @@
 from __future__ import print_function, division
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from tensorflow.keras.preprocessing.image import img_to_array
+from tensorflow.keras.models import load_model as tf_load_model
+from models.retinaface import RetinaFace
+from utils.box_utils import decode, decode_landm
+from data import cfg_mnet, cfg_re50
+from layers.functions.prior_box import PriorBox
+from utils.nms.py_cpu_nms import py_cpu_nms
+import torch.backends.cudnn as cudnn
 import pandas as pd
 import torch
+torch.cuda.empty_cache()
 import torch.nn as nn
 import numpy as np
 import torchvision
 from torchvision import transforms
-import os
 import argparse
 import cv2
 from tqdm import tqdm
@@ -14,26 +25,10 @@ from itertools import chain
 from matplotlib import pyplot as plt
 import gc
 
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
-from tensorflow.keras.preprocessing.image import img_to_array
-from tensorflow.keras.models import load_model as tf_load_model
-
-from models.retinaface import RetinaFace
-from utils.box_utils import decode, decode_landm
-from data import cfg_mnet, cfg_re50
-from layers.functions.prior_box import PriorBox
-from utils.nms.py_cpu_nms import py_cpu_nms
-import torch.backends.cudnn as cudnn
-
-from numba import cuda
-
 
 def free_cache():
-    with torch.no_grad():
-        gc.collect()
-        torch.cuda.empty_cache()
-    cuda.select_device(0)
-    cuda.close()
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def check_keys(model, pretrained_state_dict):
@@ -70,14 +65,15 @@ def face_detect(image, device):
     cfg = cfg_re50
 
     # net and model
+    print("Loading face detector model...")
     net = RetinaFace(cfg=cfg, phase = 'test')
     net = load_model(net, 'models/Resnet50_Final.pth', True)
-    net.eval()
-    cudnn.benchmark = True
     net = net.to(device)
+    net.eval()
+
+    #cudnn.benchmark = True
 
     resize = 1
-
     img_raw = image
     img = np.float32(img_raw)
 
@@ -89,6 +85,7 @@ def face_detect(image, device):
     img = img.to(device)
     scale = scale.to(device)
 
+    print("Detecting faces...")
     loc, conf, _ = net(img)  # forward pass
 
     priorbox = PriorBox(cfg, image_size=(im_height, im_width))
@@ -181,8 +178,8 @@ def predidct_age_gender_race(img, num_faces, bboxes, id_, device):
     race_preds_fair = []
     gender_preds_fair = []
     age_preds_fair = []
-    race_scores_fair_4 = []
-    race_preds_fair_4 = []
+    #race_scores_fair_4 = []
+    #race_preds_fair_4 = []
     
     face_mask = []
 
@@ -223,33 +220,33 @@ def predidct_age_gender_race(img, num_faces, bboxes, id_, device):
         age_preds_fair.append(age_pred)
 
         # fair 4 class
-        outputs = model_fair_4(image)
-        outputs = outputs.cpu().detach().numpy()
-        outputs = np.squeeze(outputs)
+        #outputs = model_fair_4(image)
+        #outputs = outputs.cpu().detach().numpy()
+        #outputs = np.squeeze(outputs)
 
-        race_outputs = outputs[:4]
-        race_score = np.exp(race_outputs) / np.sum(np.exp(race_outputs))
-        race_pred = np.argmax(race_score)
+        #race_outputs = outputs[:4]
+        #race_score = np.exp(race_outputs) / np.sum(np.exp(race_outputs))
+        #race_pred = np.argmax(race_score)
 
-        race_scores_fair_4.append(race_score)
-        race_preds_fair_4.append(race_pred)
+        #race_scores_fair_4.append(race_score)
+        #race_preds_fair_4.append(race_pred)
 
     result = pd.DataFrame([face_names,
                            race_preds_fair,
-                           race_preds_fair_4,
+                           #race_preds_fair_4,
                            gender_preds_fair,
                            age_preds_fair,
-                           race_scores_fair, race_scores_fair_4,
+                           race_scores_fair, #race_scores_fair_4,
                            gender_scores_fair,
                            age_scores_fair,
                            bboxes]).T
     result.columns = ['index',
                       'race_preds_fair',
-                      'race_preds_fair_4',
+                      #'race_preds_fair_4',
                       'gender_preds_fair',
                       'age_preds_fair',
                       'race_scores_fair',
-                      'race_scores_fair_4',
+                      #'race_scores_fair_4',
                       'gender_scores_fair',
                       'age_scores_fair',
                       "bbox"]
@@ -263,10 +260,10 @@ def predidct_age_gender_race(img, num_faces, bboxes, id_, device):
     result.loc[result['race_preds_fair'] == 6, 'race'] = 'Middle Eastern'
 
     # race fair 4
-    result.loc[result['race_preds_fair_4'] == 0, 'race4'] = 'White'
-    result.loc[result['race_preds_fair_4'] == 1, 'race4'] = 'Black'
-    result.loc[result['race_preds_fair_4'] == 2, 'race4'] = 'Asian'
-    result.loc[result['race_preds_fair_4'] == 3, 'race4'] = 'Indian'
+    #result.loc[result['race_preds_fair_4'] == 0, 'race4'] = 'White'
+    #result.loc[result['race_preds_fair_4'] == 1, 'race4'] = 'Black'
+    #result.loc[result['race_preds_fair_4'] == 2, 'race4'] = 'Asian'
+    #result.loc[result['race_preds_fair_4'] == 3, 'race4'] = 'Indian'
 
     # gender
     result.loc[result['gender_preds_fair'] == 0, 'gender'] = 'Male'
@@ -284,7 +281,7 @@ def predidct_age_gender_race(img, num_faces, bboxes, id_, device):
     result.loc[result['age_preds_fair'] == 8, 'age'] = '75'
 
     result[['index', 'race', 'gender', 'age', 'bbox', 'age_preds_fair', 'age_scores_fair']].to_csv("output/log_{}.csv".format(id_), index=False)
-    print("Saved results at log.csv")
+    print("Saved results at log_{}.csv".format(id_))
 
     del model
     del model_fair_7
