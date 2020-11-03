@@ -20,13 +20,7 @@
   
 
 ## Setup
-<p align="justify"> 
- <a>All of requirements is show in the badgets above, but if you want to install all of them, enter the repository and execute the following line of code:</a>
-</p>
 
-```shell
-pip3 install -r requirements.txt
-```
 <p align="justify"> 
  <a>Make sure after your git clone, create a folder called output. To do it, use:</a>
 </p>
@@ -41,6 +35,14 @@ cd FaceScanner
 
 ```shell
 mkdir output
+```
+
+<p align="justify"> 
+ <a>All of requirements is show in the badgets above, but if you want to install all of them, enter the repository and execute the following line of code:</a>
+</p>
+
+```shell
+pip3 install -r requirements.txt
 ```
 
 <p align="justify"> 
