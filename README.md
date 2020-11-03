@@ -38,7 +38,9 @@ mkdir output
 ```
 
 <p align="justify"> 
- <a>All of requirements is show in the badgets above, but if you want to install all of them, enter the repository and execute the following line of code:</a>
+ <a>Download and paste the <a href="https://drive.google.com/drive/folders/1GhJrTFzh8-giSw0oEMseWbAbDn_M3U5M?usp=sharing">models</a> inside the folder models.</a>
+
+<a>All of requirements is show in the badgets above, but if you want to install all of them, enter the repository and execute the following line of code:</a>
 </p>
 
 ```shell
