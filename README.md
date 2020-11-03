@@ -27,6 +27,21 @@
 ```shell
 pip3 install -r requirements.txt
 ```
+<p align="justify"> 
+ <a>Make sure after your git clone, create a folder called output. To do it, use:</a>
+</p>
+
+```shell
+git clone https://github.com/victorkich/FaceScanner/
+```
+
+```shell
+cd FaceScanner
+```
+
+```shell
+mkdir output
+```
 
 <p align="justify"> 
  <a>For test in your image paste the file inside tests folder and put the following code:</a>
