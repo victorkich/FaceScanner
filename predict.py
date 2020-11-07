@@ -32,27 +32,27 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--img', dest='img', action='store', )
 args = parser.parse_args()
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 print("Torch CUDA available: {}".format(torch.cuda.is_available()))
 
 
 def load_super_model():
     print('Loading super resolution model...')
     torch.manual_seed(123)
-    if device=='cuda':
+    if torch.cuda.is_available():
         gpus_list=range(1)
         torch.cuda.manual_seed(123)
     super_model = DBPNLL(num_channels=3, base_filter=64,  feat = 256, num_stages=10, scale_factor=8)
-    if device=='cuda':
+    if torch.cuda.is_available():
         super_model = torch.nn.DataParallel(super_model, device_ids=gpus_list)
     super_model.load_state_dict(torch.load('models/DBPNLL_x8.pth', map_location=lambda storage, loc: storage))
-    if device=='cuda':
+    if torch.cuda.is_available():
         super_model = super_model.cuda(gpus_list[0])
     super_model.eval()
     return super_model
 
 
-def super_image(image):
+def super_image(super_model, image):
     trans = transforms.Compose([
         transforms.ToPILImage(),
         transforms.Resize((256, 256)),
@@ -66,8 +66,8 @@ def super_image(image):
     
     with torch.no_grad():
         img = Variable(image)
-    if device=='cuda':
-        img = img.cuda(gpus_list[0])
+    if torch.cuda.is_available():
+        img = img.cuda(0)
 
     with torch.no_grad():
         prediction = super_model(img)
@@ -103,7 +103,7 @@ def load_retina_model():
     torch.set_grad_enabled(False)
     cfg = cfg_re50
     model = RetinaFace(cfg=cfg, phase='test')
-    if device=='cpu':
+    if not torch.cuda.is_available():
         pretrained_dict = torch.load('models/Resnet50_Final.pth', map_location=lambda storage, loc: storage)
     else:
         dev = torch.cuda.current_device()
@@ -130,7 +130,7 @@ def face_detect(model, image):
     cudnn.benchmark = True
     cfg = cfg_re50
     resize = 1
-    
+
     img_raw = image
     img = np.float32(img_raw)
 
@@ -183,11 +183,10 @@ def face_detect(model, image):
         b = list(map(int, b))
         bb.append(b)
     
-    del net
-    return len(bb), bb
+    return bb
 
 
-def mask_detect(model, image, bboxes):
+def mask_detect(super_model, model, image, bboxes):
     print('Detecting masks...')
     mask_list = []
     for bb in tqdm(bboxes):
@@ -212,15 +211,15 @@ def mask_detect(model, image, bboxes):
 
 def load_fairface_model():
     print("Loading age, gender, and race models...")
-    model_fair_7 = torchvision.models.resnet34(pretrained=True)
-    model_fair_7.fc = nn.Linear(model_fair_7.fc.in_features, 18)
-    model_fair_7.load_state_dict(torch.load('models/res34_fair_align_multi_7_20190809.pt'))
-    model_fair_7 = model_fair_7.to(device)
-    model_fair_7.eval()
-    return model_fair_7
+    model = torchvision.models.resnet34(pretrained=True)
+    model.fc = nn.Linear(model.fc.in_features, 18)
+    model.load_state_dict(torch.load('models/res34_fair_align_multi_7_20190809.pt'))
+    model = model.to(device)
+    model.eval()
+    return model
 
 
-def predict_age_gender_race(model, img, bboxes):
+def predict_age_gender_race(super_model, model, img, bboxes):
     print('Classifying genders, ages, and races...')
     trans = transforms.Compose([
         transforms.ToPILImage(),
@@ -240,11 +239,11 @@ def predict_age_gender_race(model, img, bboxes):
 
     for i, bb in tqdm(enumerate(bboxes)):
         raw_face = img[bb[1]:bb[3], bb[0]:bb[2]]
-        image = trans(raw_face)
+        super_raw_face = super_image(super_model, raw_face)
+
+        image = trans(super_raw_face)
         image = image.view(1, 3, 224, 224)  # reshape image to match model dimensions (1 batch size)
         image = image.to(device)
-
-        face_names.append(i)
 
         # fair
         outputs = model(image)
@@ -259,6 +258,7 @@ def predict_age_gender_race(model, img, bboxes):
         gender_score = np.exp(gender_outputs) / np.sum(np.exp(gender_outputs))
         age_score = np.exp(age_outputs) / np.sum(np.exp(age_outputs))
 
+        face_names.append(i)
         race_pred = np.argmax(race_score)
         gender_pred = np.argmax(gender_score)
         age_pred = np.argmax(age_score)
@@ -331,7 +331,7 @@ def create_log_and_image(id_, img, bboxes, agr_table, mask_list):
     print("Saved image at output/output_{}".format(id_))
 
     print("Saving log...")
-    mask_table = pd.DataFrame(mask_list, 'mask')
+    mask_table = pd.DataFrame(mask_list, columns=['mask'])
     result = pd.concat([agr_table, mask_table], axis = 1) 
     result[['index', 'race', 'gender', 'age', 'bbox', 'mask']].to_csv("output/log_{}.csv".format(id_), index=False)
     print("Saved results at log_{}.csv".format(id_))
@@ -384,16 +384,17 @@ if __name__ == "__main__":
     id_, img = open_image()
 
     model = load_retina_model()
-    num_faces, bboxes = face_detect(model, img)
-    print("Faces number: {}".format(num_faces))
+    bboxes = face_detect(model, img)
+    print("Faces number: {}".format(len(bboxes)))
     free_cache(model)
     
+    super_model = load_super_model()
     model = load_mask_model()
-    mask_list = mask_detect(model, img, bboxes)
+    mask_list = mask_detect(super_model, model, img, bboxes)
     free_cache(model)
 
     model = load_fairface_model()
-    agr_table = predict_age_gender_race(model, img, bboxes)
+    agr_table = predict_age_gender_race(super_model, model, img, bboxes)
     free_cache(model)
 
     create_log_and_image(id_, img, bboxes, agr_table, mask_list)
