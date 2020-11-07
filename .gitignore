@@ -1,4 +1,4 @@
 fairface_alldata_4race_20191111.pt
 res34_fair_align_multi_7_20190809.pt
 Resnet50_Final.pth
-output/
+DBPNLL_x8.pth
