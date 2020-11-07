@@ -32,7 +32,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--img', dest='img', action='store', )
 args = parser.parse_args()
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Torch CUDA available: {}".format(torch.cuda.is_available()))
 
 
@@ -40,14 +40,13 @@ def load_super_model():
     print('Loading super resolution model...')
     torch.manual_seed(123)
     if torch.cuda.is_available():
-        gpus_list=range(1)
         torch.cuda.manual_seed(123)
     super_model = DBPNLL(num_channels=3, base_filter=64,  feat = 256, num_stages=10, scale_factor=8)
     if torch.cuda.is_available():
-        super_model = torch.nn.DataParallel(super_model, device_ids=gpus_list)
+        super_model = torch.nn.DataParallel(super_model, device_ids=[0])
     super_model.load_state_dict(torch.load('models/DBPNLL_x8.pth', map_location=lambda storage, loc: storage))
     if torch.cuda.is_available():
-        super_model = super_model.cuda(gpus_list[0])
+        super_model = super_model.cuda()
     super_model.eval()
     return super_model
 
@@ -67,7 +66,7 @@ def super_image(super_model, image):
     with torch.no_grad():
         img = Variable(image)
     if torch.cuda.is_available():
-        img = img.cuda(0)
+        img = img.cuda()
 
     with torch.no_grad():
         prediction = super_model(img)
@@ -182,7 +181,6 @@ def face_detect(model, image):
             continue
         b = list(map(int, b))
         bb.append(b)
-    
     return bb
 
 
@@ -332,7 +330,7 @@ def create_log_and_image(id_, img, bboxes, agr_table, mask_list):
 
     print("Saving log...")
     mask_table = pd.DataFrame(mask_list, columns=['mask'])
-    result = pd.concat([agr_table, mask_table], axis = 1) 
+    result = pd.concat([agr_table, mask_table], axis=1) 
     result[['index', 'race', 'gender', 'age', 'bbox', 'mask']].to_csv("output/log_{}.csv".format(id_), index=False)
     print("Saved results at log_{}.csv".format(id_))
 
