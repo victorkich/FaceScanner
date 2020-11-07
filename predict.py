@@ -32,8 +32,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--img', dest='img', action='store', )
 args = parser.parse_args()
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Torch CUDA available: {}".format(torch.cuda.is_available()))
+cudnn.benchmark = True
+torch.ones((10*2**18)).cuda().contiguous() 
 
 
 def load_super_model():
@@ -45,8 +47,9 @@ def load_super_model():
     if torch.cuda.is_available():
         super_model = torch.nn.DataParallel(super_model, device_ids=[0])
     super_model.load_state_dict(torch.load('models/DBPNLL_x8.pth', map_location=lambda storage, loc: storage))
-    if torch.cuda.is_available():
-        super_model = super_model.cuda()
+    with torch.no_grad():
+        if torch.cuda.is_available():
+            super_model = super_model.cuda()
     super_model.eval()
     return super_model
 
@@ -126,7 +129,6 @@ def load_mask_model():
 
 def face_detect(model, image):
     print("Detecting faces...")
-    cudnn.benchmark = True
     cfg = cfg_re50
     resize = 1
 
