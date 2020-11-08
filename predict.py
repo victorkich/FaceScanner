@@ -147,21 +147,19 @@ def mask_detect(model, image, bboxes):
     print('Detecting masks...')
     mask_list = []
     for bb in tqdm(bboxes):
+        for e, b in enumerate(bb):
+            if b < 0:
+                bb[e] = 0
         raw_face = image[bb[1]:bb[3], bb[0]:bb[2]]
-
-        try:
-            img_UMat = cv2.UMat(raw_face)
-            face = cv2.resize(img_UMat, (224, 224))
-            face = cv2.UMat.get(face)
-            face = img_to_array(face)
-            face = preprocess_input(face)
-            face = np.expand_dims(face, axis=0)
-
-            (mask, withoutMask) = model.predict(face)[0]
-            label = "Mask" if mask > withoutMask else "No Mask"
-        except:
-            label = "No Mask"
-
+        img_UMat = cv2.UMat(raw_face)
+        face = cv2.cvtColor(img_UMat, cv2.COLOR_BGR2RGB)
+        face = cv2.resize(face, (224, 224))
+        face = cv2.UMat.get(face)
+        face = img_to_array(face)
+        face = preprocess_input(face)
+        face = np.expand_dims(face, axis=0)
+        (mask, withoutMask) = model.predict(face)[0]
+        label = "Mask" if mask > withoutMask else "No Mask"
         mask_list.append(label)
     return mask_list
 
@@ -194,10 +192,16 @@ def predict_age_gender_race(model, img, bboxes):
     gender_preds_fair = []
     age_preds_fair = []
 
-    for i, bb in tqdm(enumerate(bboxes)):
+    for i, bb in enumerate(tqdm(bboxes)):
+        for e, b in enumerate(bb):
+            if b < 0:
+                bb[e] = 0
         raw_face = img[bb[1]:bb[3], bb[0]:bb[2]]
+        img_UMat = cv2.UMat(raw_face)
+        raw_face = cv2.cvtColor(img_UMat, cv2.COLOR_BGR2RGB)
+        face = cv2.UMat.get(raw_face)
 
-        image = trans(raw_face)
+        image = trans(face)
         image = image.view(1, 3, 224, 224)  # reshape image to match model dimensions (1 batch size)
         image = image.to(device)
 
@@ -273,7 +277,7 @@ def create_log_and_image(id_, img, bboxes, agr_table, mask_list):
     print("Creating a bounding box image...")
     shape = img.shape
     new_img = cv2.UMat(img)
-    for i, bb in tqdm(enumerate(bboxes)):
+    for i, bb in enumerate(tqdm(bboxes)):
         color = (0, 255, 0) if mask_list[i] == "Mask" else (0, 0, 255)
         cv2.rectangle(new_img, (bb[0], bb[1]), (bb[2], bb[3]), color, thickness=2)
         contour_top, contour_bot = get_contours(bb, shape)
@@ -309,8 +313,7 @@ def get_age(results):
     #x = np.arange(0, 75)
     #plt.plot(x, yy)
     #plt.show()
-    if age > 30 and age < 60: age = age + 4
-    elif age < 30 and age > 19: age = age - 4
+    if age < 30 and age > 20: age = int(age - (age - 20) / 2)
     return age
 
 
