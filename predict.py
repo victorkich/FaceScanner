@@ -13,7 +13,6 @@ from matplotlib import pyplot as plt
 from data import cfg_mnet, cfg_re50
 from torch.autograd import Variable
 from torchvision import transforms
-from dbpn_v1 import Net as DBPNLL
 from scipy.signal import lfilter
 from itertools import chain
 from PIL import Image
@@ -35,48 +34,6 @@ args = parser.parse_args()
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("Torch CUDA available: {}".format(torch.cuda.is_available()))
 cudnn.benchmark = True
-torch.ones((10*2**18)).cuda().contiguous() 
-
-
-def load_super_model():
-    print('Loading super resolution model...')
-    torch.manual_seed(123)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(123)
-    super_model = DBPNLL(num_channels=3, base_filter=64,  feat = 256, num_stages=10, scale_factor=8)
-    if torch.cuda.is_available():
-        super_model = torch.nn.DataParallel(super_model, device_ids=[0])
-    super_model.load_state_dict(torch.load('models/DBPNLL_x8.pth', map_location=lambda storage, loc: storage))
-    with torch.no_grad():
-        if torch.cuda.is_available():
-            super_model = super_model.cuda()
-    super_model.eval()
-    return super_model
-
-
-def super_image(super_model, image):
-    trans = transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize((256, 256)),
-        transforms.ToTensor(),
-    ])
-
-    image = trans(image)
-    image = image.view(1, 3, 256, 256)  # reshape image to match model dimensions (1 batch size)
-    image = image.to(device)
-
-    
-    with torch.no_grad():
-        img = Variable(image)
-    if torch.cuda.is_available():
-        img = img.cuda()
-
-    with torch.no_grad():
-        prediction = super_model(img)
-
-    data = prediction.cpu().data
-    img = data.squeeze().clamp(0, 1).numpy().transpose(1,2,0)
-    return img
 
 
 def free_cache(model=None):
@@ -186,7 +143,7 @@ def face_detect(model, image):
     return bb
 
 
-def mask_detect(super_model, model, image, bboxes):
+def mask_detect(model, image, bboxes):
     print('Detecting masks...')
     mask_list = []
     for bb in tqdm(bboxes):
@@ -219,7 +176,7 @@ def load_fairface_model():
     return model
 
 
-def predict_age_gender_race(super_model, model, img, bboxes):
+def predict_age_gender_race(model, img, bboxes):
     print('Classifying genders, ages, and races...')
     trans = transforms.Compose([
         transforms.ToPILImage(),
@@ -239,9 +196,8 @@ def predict_age_gender_race(super_model, model, img, bboxes):
 
     for i, bb in tqdm(enumerate(bboxes)):
         raw_face = img[bb[1]:bb[3], bb[0]:bb[2]]
-        super_raw_face = super_image(super_model, raw_face)
 
-        image = trans(super_raw_face)
+        image = trans(raw_face)
         image = image.view(1, 3, 224, 224)  # reshape image to match model dimensions (1 batch size)
         image = image.to(device)
 
@@ -320,11 +276,12 @@ def create_log_and_image(id_, img, bboxes, agr_table, mask_list):
     for i, bb in tqdm(enumerate(bboxes)):
         color = (0, 255, 0) if mask_list[i] == "Mask" else (0, 0, 255)
         cv2.rectangle(new_img, (bb[0], bb[1]), (bb[2], bb[3]), color, thickness=2)
-        contour = get_contours(bb, shape)
+        contour_top, contour_bot = get_contours(bb, shape)
         age = get_age(agr_table['age_scores_fair'][i])
-        cv2.putText(img=new_img, text='{} {} {}'.format(agr_table['gender'][i], age, agr_table['race'][i]),
-                    org=(contour[0], contour[1]), fontScale=1, color=color, thickness=2, lineType=cv2.LINE_4,
-                    fontFace=cv2.FONT_HERSHEY_PLAIN)
+        cv2.putText(img=new_img, text='{} {}'.format(agr_table['gender'][i], age), org=(contour_top[0], contour_top[1]),
+                    fontScale=1, color=color, thickness=2, lineType=cv2.LINE_4, fontFace=cv2.FONT_HERSHEY_PLAIN)
+        cv2.putText(img=new_img, text=agr_table['race'][i], org=(contour_bot[0], contour_bot[1]), fontScale=1, 
+                    color=color, thickness=2, lineType=cv2.LINE_4, fontFace=cv2.FONT_HERSHEY_PLAIN)
 
     final_img = cv2.UMat.get(new_img)
     cv2.imwrite("output/output_{}.jpg".format(id_), final_img)
@@ -344,7 +301,7 @@ def get_age(results):
            np.linspace(results[6], results[7], 10), np.linspace(results[7], results[8], 10)]
     arr = np.array(list(chain.from_iterable(res)))
     
-    n = 7
+    n = 2
     b = [1.0 / n] * n
     a = 1
     yy = lfilter(b, a, arr)
@@ -352,22 +309,18 @@ def get_age(results):
     #x = np.arange(0, 75)
     #plt.plot(x, yy)
     #plt.show()
+    if age > 30 and age < 60: age = age + 4
+    elif age < 30 and age > 19: age = age - 4
     return age
 
 
 def get_contours(bbox, shape):
-    contour = []
-    x = bbox[0]-20
-    if x < 0:
-        contour.append(0)
-    else:
-        contour.append(x)
-    y = bbox[3]+20
-    if y > shape[1]:
-        contour.append(shape[1])
-    else:
-        contour.append(y)
-    return contour
+    x = bbox[0] + 5
+    y = bbox[3] - 10
+    contourTop = [x, y]
+    y = bbox[1] + 20
+    contourBot = [x, y]
+    return contourTop, contourBot
 
 
 def open_image():
@@ -375,7 +328,7 @@ def open_image():
     dir_ = os.path.abspath(os.path.dirname(__file__))
     img = cv2.imread("{}/{}".format(dir_, args.img))
     outputs = os.listdir("{}/output".format(dir_))
-    id_ = len(outputs)/2+1
+    id_ = int(len(outputs)/2+1)
     return id_, img
 
 
@@ -388,13 +341,12 @@ if __name__ == "__main__":
     print("Faces number: {}".format(len(bboxes)))
     free_cache(model)
     
-    super_model = load_super_model()
     model = load_mask_model()
-    mask_list = mask_detect(super_model, model, img, bboxes)
+    mask_list = mask_detect(model, img, bboxes)
     free_cache(model)
 
     model = load_fairface_model()
-    agr_table = predict_age_gender_race(super_model, model, img, bboxes)
+    agr_table = predict_age_gender_race(model, img, bboxes)
     free_cache(model)
 
     create_log_and_image(id_, img, bboxes, agr_table, mask_list)
