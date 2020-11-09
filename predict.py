@@ -197,11 +197,11 @@ def predict_age_gender_race(model, img, bboxes):
             if b < 0:
                 bb[e] = 0
         raw_face = img[bb[1]:bb[3], bb[0]:bb[2]]
-        img_UMat = cv2.UMat(raw_face)
-        raw_face = cv2.cvtColor(img_UMat, cv2.COLOR_BGR2RGB)
-        face = cv2.UMat.get(raw_face)
+        #img_UMat = cv2.UMat(raw_face)
+        #raw_face = cv2.cvtColor(img_UMat, cv2.COLOR_BGR2RGB)
+        #face = cv2.UMat.get(raw_face)
 
-        image = trans(face)
+        image = trans(raw_face)
         image = image.view(1, 3, 224, 224)  # reshape image to match model dimensions (1 batch size)
         image = image.to(device)
 
@@ -305,7 +305,7 @@ def get_age(results):
            np.linspace(results[6], results[7], 10), np.linspace(results[7], results[8], 10)]
     arr = np.array(list(chain.from_iterable(res)))
     
-    n = 2
+    n = 3
     b = [1.0 / n] * n
     a = 1
     yy = lfilter(b, a, arr)
@@ -313,7 +313,8 @@ def get_age(results):
     #x = np.arange(0, 75)
     #plt.plot(x, yy)
     #plt.show()
-    if age < 30 and age > 20: age = int(age - (age - 20) / 2)
+    if age < 30 and age > 20: age = age - 3
+    elif age > 13 and age < 17: age = age + 4
     return age
 
 
